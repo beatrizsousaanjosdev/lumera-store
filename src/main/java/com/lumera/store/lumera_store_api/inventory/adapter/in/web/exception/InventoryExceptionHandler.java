@@ -1,6 +1,7 @@
 package com.lumera.store.lumera_store_api.inventory.adapter.in.web.exception;
 
 import com.lumera.store.lumera_store_api.inventory.application.exception.InventoryNotFoundException;
+import com.lumera.store.lumera_store_api.inventory.application.exception.OrderManagedStockException;
 import com.lumera.store.lumera_store_api.inventory.domain.exception.InsufficientStockException;
 import com.lumera.store.lumera_store_api.inventory.domain.exception.InvalidInventoryException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -36,6 +37,12 @@ public class InventoryExceptionHandler extends ResponseEntityExceptionHandler {
     public ProblemDetail handleInventoryNotFound(
             InventoryNotFoundException exception, HttpServletRequest request) {
         return problem(HttpStatus.NOT_FOUND, "Inventory not found", exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(OrderManagedStockException.class)
+    public ProblemDetail handleOrderManagedStock(
+            OrderManagedStockException exception, HttpServletRequest request) {
+        return problem(HttpStatus.CONFLICT, "Order-managed stock", exception.getMessage(), request);
     }
 
     @ExceptionHandler(InsufficientStockException.class)

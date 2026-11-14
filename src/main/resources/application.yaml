@@ -36,13 +36,24 @@ app:
     topics:
       product-created: lumera.product.created.v1
       product-created-dlt: lumera.product.created.v1.DLT
+      order-created: lumera.order.created.v1
+      order-created-dlt: lumera.order.created.v1.DLT
+      stock-reservation-result: lumera.stock.reservation.result.v1
+      stock-reservation-result-dlt: lumera.stock.reservation.result.v1.DLT
   outbox:
     enabled: ${OUTBOX_ENABLED:false}
     batch-size: 50
     send-timeout: 15s
     fixed-delay-ms: 5000
     initial-delay-ms: 10000
+  order:
+    kafka:
+      enabled: ${ORDER_KAFKA_ENABLED:false}
+      group-id: lumera-orders
   inventory:
+    order-kafka:
+      enabled: ${INVENTORY_ORDER_KAFKA_ENABLED:false}
+      group-id: lumera-inventory-orders
     kafka:
       enabled: ${INVENTORY_KAFKA_ENABLED:false}
 logging:

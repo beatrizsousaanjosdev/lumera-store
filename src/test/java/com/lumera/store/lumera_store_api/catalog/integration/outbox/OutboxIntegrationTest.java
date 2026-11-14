@@ -1,10 +1,12 @@
 package com.lumera.store.lumera_store_api.catalog.integration.outbox;
 
-import com.lumera.store.lumera_store_api.catalog.adapter.out.messaging.outbox.*;
+import com.lumera.store.lumera_store_api.shared.infrastructure.outbox.messaging.*;
 import com.lumera.store.lumera_store_api.catalog.adapter.out.persistence.outbox.*;
 import com.lumera.store.lumera_store_api.catalog.application.event.ProductCreatedEvent;
 import com.lumera.store.lumera_store_api.catalog.application.port.in.CreateProductsUsecase;
 import com.lumera.store.lumera_store_api.catalog.domain.Category;
+import com.lumera.store.lumera_store_api.shared.infrastructure.outbox.persistence.OutboxEventEntity;
+import com.lumera.store.lumera_store_api.shared.infrastructure.outbox.persistence.OutboxEventRepository;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -37,7 +39,7 @@ import java.util.stream.IntStream;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-@SpringBootTest(properties = {"app.outbox.enabled=false", "app.inventory.kafka.enabled=false"})
+@SpringBootTest(properties = {"app.outbox.enabled=false", "app.inventory.kafka.enabled=false", "app.inventory.order-kafka.enabled=false", "app.order.kafka.enabled=false"})
 @Testcontainers
 @SuppressWarnings({"rawtypes", "unchecked"})
 class OutboxIntegrationTest {
@@ -69,7 +71,8 @@ class OutboxIntegrationTest {
     @Autowired JdbcTemplate jdbc;
     @Autowired CreateProductsUsecase createProduct;
     @Autowired OutboxEventPublisher publisher;
-    @Autowired OutboxEventRepository repository;
+    @Autowired
+    OutboxEventRepository repository;
     @Autowired PlatformTransactionManager transactionManager;
     @Autowired JsonMapper mapper;
     @MockitoSpyBean(name = "kafkaTemplate")
@@ -88,7 +91,7 @@ class OutboxIntegrationTest {
     void shouldCommitProductAndPendingEventTogether() {
         var product = create();
         var event = repository.findAll().getFirst();
-        assertEquals(product, event.getProductId());
+        assertEquals(product, event.getAggregateId());
         assertNull(event.getPublishedAt());
         var payload = mapper.readValue(event.getPayload(), ProductCreatedEvent.class);
         assertEquals(product, payload.productId());
@@ -111,7 +114,7 @@ class OutboxIntegrationTest {
         assertThrows(IllegalTransactionStateException.class,
                 () -> outboxAdapter.append(ProductCreatedEvent.create(UUID.randomUUID())));
         assertThrows(IllegalTransactionStateException.class,
-                () -> repository.findPendingForUpdate("ProductCreated", 1));
+                () -> repository.findPendingForUpdate("Product", "ProductCreated", 1));
     }
 
     @Test
@@ -184,7 +187,7 @@ class OutboxIntegrationTest {
         try (var consumer = consumerAtEnd(); var executor = Executors.newFixedThreadPool(2)) {
             Future<?> lockHolder = executor.submit(() -> new TransactionTemplate(transactionManager)
                     .executeWithoutResult(status -> {
-                        var held = repository.findPendingForUpdate("ProductCreated", 1).getFirst();
+                        var held = repository.findPendingForUpdate("Product", "ProductCreated", 1).getFirst();
                         acquired.complete(held.getEventId());
                         try {
                             if (!release.await(15, TimeUnit.SECONDS)) throw new AssertionError("Lock release timed out");
@@ -217,16 +220,39 @@ class OutboxIntegrationTest {
         create();
         var otherId = UUID.randomUUID();
         jdbc.update("""
-                INSERT INTO outbox_events(event_id, product_id, event_type, payload, occurred_at)
-                VALUES (?, ?, 'OtherEvent', '{}', now())
+                INSERT INTO outbox_events(event_id, aggregate_id, aggregate_type, event_type, payload, occurred_at)
+                VALUES (?, ?, 'Product', 'OtherEvent', '{}', now())
                 """, otherId, UUID.randomUUID());
+        UUID wrongAggregate = UUID.randomUUID();
+        jdbc.update("INSERT INTO outbox_events(event_id,aggregate_id,aggregate_type,event_type,payload,occurred_at) VALUES (?,?,'Unknown','ProductCreated','{}',now())", wrongAggregate, UUID.randomUUID());
         var selected = new TransactionTemplate(transactionManager).execute(status ->
-                repository.findPendingForUpdate("ProductCreated", 1));
+                repository.findPendingForUpdate("Product", "ProductCreated", 1));
         assertNotNull(selected);
         assertEquals(1, selected.size());
         publisher.publishPending();
         assertEquals(2, publishedCount());
         assertNull(repository.findById(otherId).orElseThrow().getPublishedAt());
+        assertNull(repository.findById(wrongAggregate).orElseThrow().getPublishedAt());
+    }
+
+    @Test
+    void shouldPreserveLegacyOutboxRowsWhenMigratingFromVersionSix() {
+        String schema = "outbox_upgrade";
+        var old = org.flywaydb.core.Flyway.configure()
+                .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .schemas(schema).target("6").load();
+        old.migrate();
+        UUID pending = UUID.randomUUID(), published = UUID.randomUUID(), product = UUID.randomUUID();
+        jdbc.update("INSERT INTO outbox_upgrade.outbox_events(event_id,product_id,event_type,payload,occurred_at) VALUES (?,?,'ProductCreated','legacy',now())", pending, product);
+        jdbc.update("INSERT INTO outbox_upgrade.outbox_events(event_id,product_id,event_type,payload,occurred_at,published_at) VALUES (?,?,'ProductCreated','published',now(),now())", published, product);
+        org.flywaydb.core.Flyway.configure()
+                .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .schemas(schema).load().migrate();
+        assertEquals(product, jdbc.queryForObject("SELECT aggregate_id FROM outbox_upgrade.outbox_events WHERE event_id=?", UUID.class, pending));
+        assertEquals("Product", jdbc.queryForObject("SELECT aggregate_type FROM outbox_upgrade.outbox_events WHERE event_id=?", String.class, pending));
+        assertEquals("legacy", jdbc.queryForObject("SELECT payload FROM outbox_upgrade.outbox_events WHERE event_id=?", String.class, pending));
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM outbox_upgrade.outbox_events WHERE published_at IS NULL", Integer.class));
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM outbox_upgrade.outbox_events WHERE event_id=? AND published_at IS NOT NULL", Integer.class, published));
     }
 
     private UUID create() {

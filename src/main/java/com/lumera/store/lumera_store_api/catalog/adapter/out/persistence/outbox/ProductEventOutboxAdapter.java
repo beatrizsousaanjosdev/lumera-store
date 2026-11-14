@@ -2,6 +2,8 @@ package com.lumera.store.lumera_store_api.catalog.adapter.out.persistence.outbox
 
 import com.lumera.store.lumera_store_api.catalog.application.event.ProductCreatedEvent;
 import com.lumera.store.lumera_store_api.catalog.application.port.out.ProductEventOutboxPort;
+import com.lumera.store.lumera_store_api.shared.infrastructure.outbox.persistence.OutboxEventEntity;
+import com.lumera.store.lumera_store_api.shared.infrastructure.outbox.persistence.OutboxEventRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Propagation;
@@ -23,6 +25,7 @@ public class ProductEventOutboxAdapter implements ProductEventOutboxPort {
         OutboxEventEntity entity = new OutboxEventEntity(
                 event.eventId(),
                 event.productId(),
+                "Product",
                 "ProductCreated",
                 payload,
                 event.occurredAt()

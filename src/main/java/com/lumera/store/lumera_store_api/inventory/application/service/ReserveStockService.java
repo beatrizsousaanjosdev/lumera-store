@@ -17,6 +17,8 @@ public class ReserveStockService implements ReserveStockUsecase {
 
     private final InventoryRepositoryPort port;
 
+    private final OrderReservationGuard orderReservationGuard;
+
     @Override
     @Transactional
     public Inventory execute(StockMovementCommand command) {
@@ -25,6 +27,7 @@ public class ReserveStockService implements ReserveStockUsecase {
         Inventory inventory = port.findByProductIdForUpdate(command.productId())
                 .orElseThrow(() -> new InventoryNotFoundException(command.productId()));
 
+        orderReservationGuard.requireNoActiveOrderReservation(command.productId());
         inventory.reserve(command.amount());
 
         return port.save(inventory);

@@ -17,6 +17,8 @@ public class ConfirmStockService implements ConfirmStockUsecase {
 
     private final InventoryRepositoryPort inventoryRepositoryPort;
 
+    private final OrderReservationGuard orderReservationGuard;
+
     @Override
     @Transactional
     public Inventory execute(StockMovementCommand command) {
@@ -35,6 +37,7 @@ public class ConfirmStockService implements ConfirmStockUsecase {
                         )
                 );
 
+        orderReservationGuard.requireNoActiveOrderReservation(command.productId());
         inventory.confirmReservation(command.amount());
 
         return inventoryRepositoryPort.save(inventory);

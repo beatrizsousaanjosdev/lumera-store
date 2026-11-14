@@ -1,6 +1,6 @@
 # Lumera Store API
 
-A store backend built with **Java 25, Spring Boot, PostgreSQL, and Apache Kafka**. The project explores modular architecture, business rules, concurrency control, and reliable asynchronous communication through a product catalog and inventory system.
+A store backend built with **Java 25, Spring Boot, PostgreSQL, and Apache Kafka**. The project explores modular architecture, business rules, concurrency control, and reliable asynchronous communication through catalog, inventory, and order modules.
 
 A product is saved together with an outbox event. A background publisher sends the event to Kafka, and the inventory consumer initializes its stock without resetting existing quantities on repeated delivery.
 
@@ -22,10 +22,19 @@ A product is saved together with an outbox event. A background publisher sends t
 - Preserve existing quantities when initialization is repeated.
 - Protect stock movements with pessimistic row locking.
 
+### Orders
+
+- Create orders using active catalog products and price/name snapshots.
+- Publish `OrderCreated` through the shared transactional outbox.
+- Reserve all order items atomically in inventory; duplicate deliveries preserve quantities.
+- Publish `StockReservationResult` in the same transaction as the stock decision.
+- Apply the result to the order: `PENDING_PAYMENT` on success or `CANCELLED` on rejection.
+- Serialize concurrent reservations with an advisory lock per order and consistently ordered inventory row locks.
+
 ### Reliability and testing
 
 - Transactional Outbox with batch publishing and `FOR UPDATE SKIP LOCKED`.
-- At-least-once delivery with idempotent inventory initialization.
+- At-least-once delivery with idempotent inventory initialization, order reservations, and order result handling.
 - Consumer retries and a dead-letter topic (DLT).
 - Centralized HTTP errors using `ProblemDetail`.
 - Versioned database migrations with Flyway.
@@ -54,18 +63,18 @@ A product is saved together with an outbox event. A background publisher sends t
 The application is a **modular monolith** organized by business capability. Each module follows a hexagonal structure with domain objects, application use cases and ports, and infrastructure adapters.
 
 ```text
-catalog/                          inventory/
-├── domain/                      ├── domain/
-├── application/                 ├── application/
-│   ├── event/                   │   ├── command/
-│   ├── port/in/                 │   ├── port/in/
-│   ├── port/out/                │   ├── port/out/
-│   └── service/                 │   └── service/
-└── adapter/                     └── adapter/
-    ├── in/web/                      ├── in/web/
-    ├── out/persistence/             ├── in/messaging/
-    └── out/messaging/               └── out/persistence/
+catalog/       inventory/       order/
+├── domain/    ├── domain/      ├── domain/
+├── application/               # commands, events, use cases, and ports
+└── adapter/                   # web, Kafka, persistence, and outbox adapters
+
+shared/infrastructure/
+├── messaging/                 # event routes, decoding, retries, and DLT handling
+└── outbox/                    # shared persistence and scheduled publication
 ```
+
+The catalog also exposes a small public query contract used by orders to obtain
+active-product details without accessing catalog persistence directly.
 
 Domain objects enforce business rules without depending on Spring, JPA, or Kafka. Application services coordinate operations through ports. The application layer uses Spring annotations for dependency injection and transaction boundaries.
 
@@ -89,6 +98,24 @@ flowchart LR
 The publisher marks an event as published only after Kafka acknowledges the send. If Kafka acknowledges a message but the database transaction rolls back, the message can be sent again with the same event ID. Inventory initialization handles this by creating stock only when no record exists for that product.
 
 Database commits and Kafka offset commits are separate. The system relies on idempotency rather than claiming exactly-once processing across both systems.
+
+### Order-to-stock flow
+
+```mermaid
+flowchart LR
+    API[POST /orders] --> O[Order + OrderCreated outbox]
+    O --> K[Kafka: OrderCreated]
+    K --> I[Inventory: reserve all items]
+    I --> R[Reservation + result outbox]
+    R --> KR[Kafka: StockReservationResult]
+    KR --> S{Stock reserved?}
+    S -->|Yes| P[PENDING_PAYMENT]
+    S -->|No| C[CANCELLED]
+```
+
+Order creation and its event share one database transaction. Stock changes, the
+reservation decision, and its result event share another. Updating the order from
+the result is a separate transaction; the API therefore exposes eventual consistency.
 
 ## Getting started
 
@@ -124,35 +151,32 @@ podman compose up -d --wait postgres kafka
 
 ### 3. Create the Kafka topics
 
-Automatic topic creation is disabled. Create both the event topic and its DLT before enabling the consumer:
+Automatic topic creation is disabled. Create the three event topics and their DLTs:
 
 ```bash
-podman compose exec kafka \
-  /opt/kafka/bin/kafka-topics.sh \
-  --bootstrap-server kafka:29092 \
-  --create --if-not-exists \
-  --topic lumera.product.created.v1 \
-  --partitions 3 --replication-factor 1
-
-podman compose exec kafka \
-  /opt/kafka/bin/kafka-topics.sh \
-  --bootstrap-server kafka:29092 \
-  --create --if-not-exists \
-  --topic lumera.product.created.v1.DLT \
-  --partitions 3 --replication-factor 1
+./scripts/create-kafka-topics.sh
 ```
+
+| Event | Topic |
+|---|---|
+| ProductCreated | `lumera.product.created.v1` |
+| OrderCreated | `lumera.order.created.v1` |
+| StockReservationResult | `lumera.stock.reservation.result.v1` |
+
+Each topic has a corresponding `.DLT`. The script uses three partitions and replication factor one for local development and preserves existing topics. If an existing topic has a different partition count, ensure its DLT has the same count.
 
 The DLT has the same number of partitions because failed messages retain their source partition.
 
 ### 4. Run the API
 
-Enable both the outbox publisher and the inventory consumer:
+Enable the outbox publisher and the three consumers:
 
 ```bash
-OUTBOX_ENABLED=true INVENTORY_KAFKA_ENABLED=true ./gradlew bootRun
+OUTBOX_ENABLED=true INVENTORY_KAFKA_ENABLED=true \
+INVENTORY_ORDER_KAFKA_ENABLED=true ORDER_KAFKA_ENABLED=true ./gradlew bootRun
 ```
 
-When running from an IDE, set these two environment variables in its run configuration. A plain `./gradlew bootRun` leaves both background components disabled by default; the manual inventory endpoints remain available.
+When running from an IDE, set these four environment variables in its run configuration. A plain `./gradlew bootRun` leaves background publishing and consumers disabled by default; the manual inventory endpoints remain available.
 
 Flyway applies pending migrations at startup, and Hibernate validates the resulting schema.
 
@@ -187,7 +211,9 @@ The Compose credentials are local development defaults. This setup uses a single
 | `DB_PASSWORD` | `lumera_dev` | Database password |
 | `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | Kafka bootstrap address |
 | `OUTBOX_ENABLED` | `false` | Enable scheduled event publication |
-| `INVENTORY_KAFKA_ENABLED` | `false` | Enable inventory consumption and retry/DLT handling |
+| `INVENTORY_KAFKA_ENABLED` | `false` | Enable ProductCreated consumption by inventory |
+| `INVENTORY_ORDER_KAFKA_ENABLED` | `false` | Enable OrderCreated consumption and stock reservation |
+| `ORDER_KAFKA_ENABLED` | `false` | Enable reservation-result consumption by orders |
 
 A `.env` file is not automatically loaded by Spring Boot. Export variables in your shell or configure them in your IDE. The current Compose file defines its database credentials directly; changing application variables does not change an existing PostgreSQL user's password.
 
@@ -244,7 +270,21 @@ availableQuantity = quantity - reservedQuantity
 
 A reservation reduces availability without changing total quantity. Releasing a reservation increases availability. Confirming a reservation reduces both total and reserved quantities.
 
-Movement endpoints are not idempotent: repeating a successful request applies another movement. Only inventory initialization is idempotent at this stage.
+The quantity-based movement endpoints are not idempotent: repeating a successful
+request applies another movement. They reject reservation/release/confirmation with
+HTTP 409 while the product has active order-specific reservations, so they cannot
+consume units allocated to an order. Stock entries remain allowed.
+
+Order-specific reservation services support idempotent reserve/release/confirmation,
+all-or-nothing multi-product allocation, and a transaction-level advisory lock per
+order. The Kafka adapter consumes `OrderCreated` and records the reservation decision
+and its result event atomically. Order result handling locks the order row and accepts
+matching duplicates. Conflicting results go to the result DLT.
+
+The order creation endpoint returns `PENDING_STOCK`; subsequent `GET /orders/{id}`
+requests observe the asynchronous transition. Successful reservation keeps units
+reserved: payment processing, stock confirmation, and compensation are future work.
+Orders created while consumers are disabled remain pending until event processing resumes.
 
 ## Example workflow
 
@@ -332,7 +372,7 @@ Kafka failures are handled separately from HTTP errors. Invalid messages are sen
 Run unit and web-layer tests without containers:
 
 ```bash
-./gradlew test --tests '*domain.*' --tests '*application.*' --tests '*adapter.*'
+./gradlew test --tests '*domain.*' --tests '*application.*' --tests '*adapter.*' --tests '*shared*'
 ```
 
 Run the entire suite with Podman:
@@ -355,14 +395,15 @@ See [TESTING.md](TESTING.md) for more details.
 
 ## Current scope and roadmap
 
-Catalog, inventory, and their event-driven initialization flow are implemented. Inventory reservations currently track aggregate quantities rather than individual orders.
+Catalog, inventory, order creation/lookup, and the asynchronous order-stock reservation
+flow are implemented. Flyway V7 generalizes the existing outbox while preserving pending
+and published product events.
 
 Planned extensions:
 
-- Order aggregate, items, and controlled status transitions.
-- Price snapshots and checks for inactive products when placing orders.
-- Reservations identified by order, with idempotent confirmation and release.
+- HTTP idempotency for order creation (Kafka replay idempotency is already implemented).
 - Payment simulation and a saga coordinating stock, payment, and compensation.
+- Reservation expiry, cancellation, and recovery of orders stalled in an intermediate state.
 - Operational metrics, alerts, and a DLT replay workflow.
 
 Authentication and authorization are not implemented. This is a portfolio project with a local development environment; production deployment would require additional operational and security work.

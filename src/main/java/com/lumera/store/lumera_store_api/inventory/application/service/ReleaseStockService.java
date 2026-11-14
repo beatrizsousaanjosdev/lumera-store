@@ -17,6 +17,8 @@ public class ReleaseStockService implements ReleaseStockUsecase {
 
     private final InventoryRepositoryPort port;
 
+    private final OrderReservationGuard orderReservationGuard;
+
     @Override
     @Transactional
     public Inventory execute(StockMovementCommand command) {
@@ -25,6 +27,7 @@ public class ReleaseStockService implements ReleaseStockUsecase {
         Inventory inventory = port.findByProductIdForUpdate(command.productId())
                 .orElseThrow(() -> new InventoryNotFoundException(command.productId()));
 
+        orderReservationGuard.requireNoActiveOrderReservation(command.productId());
         inventory.release(command.amount());
 
         return port.save(inventory);

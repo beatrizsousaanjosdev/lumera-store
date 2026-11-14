@@ -17,13 +17,14 @@ import static org.mockito.Mockito.*;
 
 class InventoryServicesTest {
     private final InventoryRepositoryPort port = mock(InventoryRepositoryPort.class);
+    private final OrderReservationGuard guard = mock(OrderReservationGuard.class);
 
     private StockMovementUsecase service(String operation) {
         return switch (operation) {
             case "add" -> new AddStockService(port);
-            case "reserve" -> new ReserveStockService(port);
-            case "release" -> new ReleaseStockService(port);
-            case "confirm" -> new ConfirmStockService(port);
+            case "reserve" -> new ReserveStockService(port, guard);
+            case "release" -> new ReleaseStockService(port, guard);
+            case "confirm" -> new ConfirmStockService(port, guard);
             default -> throw new IllegalArgumentException(operation);
         };
     }

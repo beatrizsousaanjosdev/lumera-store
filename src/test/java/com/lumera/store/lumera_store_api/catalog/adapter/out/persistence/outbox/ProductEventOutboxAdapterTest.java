@@ -1,6 +1,8 @@
 package com.lumera.store.lumera_store_api.catalog.adapter.out.persistence.outbox;
 
 import com.lumera.store.lumera_store_api.catalog.application.event.ProductCreatedEvent;
+import com.lumera.store.lumera_store_api.shared.infrastructure.outbox.persistence.OutboxEventEntity;
+import com.lumera.store.lumera_store_api.shared.infrastructure.outbox.persistence.OutboxEventRepository;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import tools.jackson.databind.json.JsonMapper;
@@ -19,7 +21,7 @@ class ProductEventOutboxAdapterTest {
         verify(repository).save(captor.capture());
         var saved = captor.getValue();
         assertEquals(event.eventId(), saved.getEventId());
-        assertEquals(event.productId(), saved.getProductId());
+        assertEquals(event.productId(), saved.getAggregateId());
         assertEquals(event.occurredAt(), saved.getOccurredAt());
         assertEquals("ProductCreated", saved.getEventType());
         assertNull(saved.getPublishedAt());

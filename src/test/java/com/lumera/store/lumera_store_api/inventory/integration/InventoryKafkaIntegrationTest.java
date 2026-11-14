@@ -1,6 +1,6 @@
 package com.lumera.store.lumera_store_api.inventory.integration;
 
-import com.lumera.store.lumera_store_api.catalog.adapter.out.messaging.outbox.OutboxEventPublisher;
+import com.lumera.store.lumera_store_api.shared.infrastructure.outbox.messaging.OutboxEventPublisher;
 import com.lumera.store.lumera_store_api.catalog.application.port.in.CreateProductsUsecase;
 import com.lumera.store.lumera_store_api.catalog.domain.Category;
 import com.lumera.store.lumera_store_api.inventory.adapter.in.messaging.ProductCreatedMessage;
@@ -54,6 +54,8 @@ import static org.mockito.Mockito.*;
 @SpringBootTest(properties = {
         "app.outbox.enabled=false",
         "app.inventory.kafka.enabled=true",
+        "app.inventory.order-kafka.enabled=false",
+        "app.order.kafka.enabled=false",
         "spring.kafka.consumer.group-id=inventory-kafka-integration"
 })
 @Testcontainers
@@ -141,7 +143,7 @@ class InventoryKafkaIntegrationTest {
         await(() -> inventoryCount(id) == 1, "Product event must initialize inventory");
         assertState(id, 0, 0);
         assertEquals(1, jdbc.queryForObject(
-                "SELECT count(*) FROM outbox_events WHERE product_id = ? AND published_at IS NOT NULL", Integer.class, id));
+                "SELECT count(*) FROM outbox_events WHERE aggregate_id = ? AND published_at IS NOT NULL", Integer.class, id));
     }
 
     @Test

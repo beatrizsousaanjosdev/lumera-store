@@ -3,6 +3,10 @@ package com.lumera.store.lumera_store_api.inventory.adapter.in.web;
 import com.lumera.store.lumera_store_api.inventory.adapter.in.web.dto.InventoryResponseDto;
 import com.lumera.store.lumera_store_api.inventory.adapter.in.web.dto.StockMovementRequestDto;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import org.springframework.http.ProblemDetail;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.MediaType;
@@ -51,6 +55,9 @@ public interface InventoryApi {
     );
 
     @Operation(summary = "Reserve stock")
+    @ApiResponse(responseCode = "409", description = "Product has active order reservations; use the order workflow.",
+            content = @Content(mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+                    schema = @Schema(implementation = ProblemDetail.class)))
     @PostMapping(
             value = "/{productId}/reservations",
             consumes = MediaType.APPLICATION_JSON_VALUE
@@ -61,6 +68,9 @@ public interface InventoryApi {
     );
 
     @Operation(summary = "Release reserved stock")
+    @ApiResponse(responseCode = "409", description = "Product has active order reservations; use the order workflow.",
+            content = @Content(mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+                    schema = @Schema(implementation = ProblemDetail.class)))
     @PostMapping(
             value = "/{productId}/reservations/release",
             consumes = MediaType.APPLICATION_JSON_VALUE
@@ -71,6 +81,9 @@ public interface InventoryApi {
     );
 
     @Operation(summary = "Confirm reserved stock withdrawal")
+    @ApiResponse(responseCode = "409", description = "Product has active order reservations; use the order workflow.",
+            content = @Content(mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+                    schema = @Schema(implementation = ProblemDetail.class)))
     @PostMapping(
             value = "/{productId}/reservations/confirm",
             consumes = MediaType.APPLICATION_JSON_VALUE

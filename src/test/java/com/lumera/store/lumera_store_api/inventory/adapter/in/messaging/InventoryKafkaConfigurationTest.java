@@ -2,6 +2,8 @@ package com.lumera.store.lumera_store_api.inventory.adapter.in.messaging;
 
 import com.lumera.store.lumera_store_api.inventory.application.port.in.InitializeInventoryUsecase;
 import org.junit.jupiter.api.Test;
+import com.lumera.store.lumera_store_api.shared.infrastructure.messaging.EventRoutes;
+import com.lumera.store.lumera_store_api.shared.infrastructure.messaging.KafkaConsumerErrorConfiguration;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.listener.DefaultErrorHandler;
@@ -11,8 +13,9 @@ import static org.mockito.Mockito.*;
 
 class InventoryKafkaConfigurationTest {
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
-            .withUserConfiguration(InventoryKafkaConfiguration.class, ProductCreatedConsumer.class)
+            .withUserConfiguration(KafkaConsumerErrorConfiguration.class, ProductCreatedConsumer.class)
             .withBean(InitializeInventoryUsecase.class, () -> mock(InitializeInventoryUsecase.class))
+            .withBean(EventRoutes.class, () -> new EventRoutes("products", "products.DLT", "orders", "orders.DLT", "results", "results.DLT"))
             .withBean(JsonMapper.class, () -> JsonMapper.builder().build())
             .withBean(KafkaTemplate.class, () -> mock(KafkaTemplate.class))
             .withPropertyValues("app.kafka.topics.product-created-dlt=products.DLT");

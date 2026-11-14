@@ -174,4 +174,14 @@ class InventoryControllerTest {
                 .andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.detail").value("The operation could not be completed."));
     }
+    @Test
+    void shouldReturn409ForLegacyMovementOnOrderManagedStock() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(release.execute(new StockMovementCommand(id, 1))).thenThrow(
+                new com.lumera.store.lumera_store_api.inventory.application.exception.OrderManagedStockException(id));
+        mvc.perform(post("/inventories/{id}/reservations/release", id)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"amount\":1}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.title").value("Order-managed stock"));
+    }
 }
