@@ -21,7 +21,7 @@ class OutboxEventPublisherTest {
             routes(), 10, Duration.ofSeconds(15));
 
     private EventRoutes routes() {
-        return new EventRoutes("products", "products.DLT", "orders", "orders.DLT", "results", "results.DLT");
+        return new EventRoutes("products", "products.DLT", "orders", "orders.DLT", "results", "results.DLT", "payments", "payments.DLT", "paymentRequests", "paymentRequests.DLT", "finalizationRequests", "finalizationRequests.DLT", "finalized", "finalized.DLT", "completed", "completed.DLT");
     }
 
     private OutboxEventEntity event() {

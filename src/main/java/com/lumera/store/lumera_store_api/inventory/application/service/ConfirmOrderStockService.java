@@ -7,6 +7,8 @@ import com.lumera.store.lumera_store_api.inventory.application.port.out.Inventor
 import com.lumera.store.lumera_store_api.inventory.application.port.out.StockReservationRepositoryPort;
 import com.lumera.store.lumera_store_api.inventory.domain.StockReservation;
 import com.lumera.store.lumera_store_api.inventory.domain.exception.InvalidStockReservationException;
+import com.lumera.store.lumera_store_api.inventory.application.event.StockFinalizedEvent;
+import com.lumera.store.lumera_store_api.inventory.application.port.out.StockReservationEventOutboxPort;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -23,6 +25,7 @@ public class ConfirmOrderStockService implements ConfirmOrderStockUsecase {
 
     private final InventoryRepositoryPort inventoryPort;
     private final StockReservationRepositoryPort reservationPort;
+    private final StockReservationEventOutboxPort eventOutbox;
 
     @Override
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -70,6 +73,10 @@ public class ConfirmOrderStockService implements ConfirmOrderStockUsecase {
         }
 
         var saved = reservationPort.save(reservation);
+
+        eventOutbox.appendFinalized(
+                StockFinalizedEvent.create(saved)
+        );
 
         log.debug("Stock confirmation staged: orderId={}", orderId);
 

@@ -34,7 +34,7 @@ or KAFKA_BOOTSTRAP_SERVERS. Images and dependencies may be downloaded on the fir
 
 Coverage includes:
 
-- Flyway V1 through V7 on an empty database, with Hibernate schema validation.
+- Flyway V1 through V11 on an empty database, with Hibernate schema validation.
 - V1 to V2 upgrade preserving legacy products and assigning category OTHER.
 - HTTP create/read/update and active-status changes with real commits.
 - Pagination, stable ordering and category/active filters in PostgreSQL.
@@ -136,7 +136,7 @@ with real Kafka, not just direct calls to the listener method.
 - Concurrent status changes serialize on the order row; ordinary reads remain non-blocking.
 
 Order-specific reservation services are implemented and tested separately below.
-Order-created events and stock reservation results are wired through Kafka. Payment workflow and the saga are not implemented yet.
+Order-created events and stock reservation results are wired through Kafka. Simulated payment and order-coordinated stock finalization are implemented.
 State transitions are currently tested in the domain and through the persistence port;
 there are no HTTP endpoints for advancing those states.
 
@@ -183,4 +183,54 @@ publisher directly with the scheduler disabled.
 - The V6 -> V7 migration preserves legacy aggregate IDs, payloads, and publication state.
 
 These tests use isolated infrastructure and wait for committed offsets before cleanup.
-Payment processing, compensation, and reservation expiry are outside this stage.
+This reservation-only test context disables payment consumption. The dedicated checkout context below tests payment and compensation. Reservation expiry is outside the current scope.
+
+## Payment and checkout coverage
+
+```sh
+./scripts/test-podman.sh --tests '*PaymentTest' --tests '*ProcessPaymentServiceTest' --tests '*Checkout*'
+```
+
+- Payment invariants, decimal normalization, final-state protection, and replay behavior.
+- Every order state/operation combination, including intermediate stock-finalization states.
+- Validation of payment identity, amount, and outcome; conflicting replays cannot overwrite accepted results.
+- Kafka adapters validate envelopes, keys, outcomes, and actions; business conflicts go to DLT and technical failures remain retryable.
+- Approval flows through all seven topics and confirms the order only after stock withdrawal.
+- Refusal releases stock before cancellation; insufficient stock never calls the payment gateway.
+- Replaying every checkout event after success or refusal does not charge, withdraw, release, or publish another decision.
+- Concurrent payment processing for one order returns one payment and calls the simulator once.
+- Payment/outbox, order/accepted-result/outbox, and stock-finalization/outbox failures roll back atomically.
+- Transient technical failures recover; three unsuccessful attempts reach the correct DLT and leave the order pending.
+- Malformed messages reach each new route's DLT; subsequent valid checkout completes.
+- Payment database constraints and V8 -> V10 upgrades preserve existing order/payment data.
+
+`CheckoutKafkaIntegrationTest` uses isolated PostgreSQL and Kafka containers, three
+partitions per topic, and all seven listeners. It waits for assignment and committed
+offsets before cleanup. The simulator is spied to choose outcomes and inject failures;
+no real payment service is called. Other contexts explicitly disable payment consumption
+so shell environment flags cannot silently enable extra listeners.
+
+Production-provider integration, refunds after an approved external charge, automatic
+DLT replay, reservation expiry, and real email delivery are outside this stage.
+
+## Notification coverage
+
+```sh
+./scripts/test-podman.sh --tests '*notification*'
+```
+
+- Required identifiers and terminal outcome contracts; notification has no dependency on order internals.
+- Order completion is committed together with its outbox event for confirmation, payment refusal, and initial stock rejection.
+- Notification service locks per order, persists one record, and ignores repeated events or new event IDs with the same outcome.
+- Contradictory outcomes and malformed messages reach the notification DLT.
+- The logging adapter defers simulated output until commit.
+- Real Kafka checkout-to-notification flow for approved and refused payments and insufficient stock.
+- Transient delivery failures roll back the notification record and recover on retry.
+- Three failed attempts reach DLT; the order remains completed and manual replay recovers notification processing.
+- Concurrent notifications for the same order create one record and schedule one simulated delivery.
+- V10 -> V11 migration preserves existing orders; persistence requires a transaction.
+
+`NotificationKafkaIntegrationTest` runs all eight listeners on isolated PostgreSQL and
+Kafka containers. Other full-context tests explicitly disable notification consumption.
+No test calls an external email provider. The simulation is recorded durably in
+`order_notifications`; log output is diagnostic and is emitted only after commit.

@@ -15,7 +15,7 @@ class InventoryKafkaConfigurationTest {
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withUserConfiguration(KafkaConsumerErrorConfiguration.class, ProductCreatedConsumer.class)
             .withBean(InitializeInventoryUsecase.class, () -> mock(InitializeInventoryUsecase.class))
-            .withBean(EventRoutes.class, () -> new EventRoutes("products", "products.DLT", "orders", "orders.DLT", "results", "results.DLT"))
+            .withBean(EventRoutes.class, () -> new EventRoutes("products", "products.DLT", "orders", "orders.DLT", "results", "results.DLT", "payments", "payments.DLT", "paymentRequests", "paymentRequests.DLT", "finalizationRequests", "finalizationRequests.DLT", "finalized", "finalized.DLT", "completed", "completed.DLT"))
             .withBean(JsonMapper.class, () -> JsonMapper.builder().build())
             .withBean(KafkaTemplate.class, () -> mock(KafkaTemplate.class))
             .withPropertyValues("app.kafka.topics.product-created-dlt=products.DLT");
@@ -37,4 +37,16 @@ class InventoryKafkaConfigurationTest {
             assertEquals(1, context.getBeansOfType(DefaultErrorHandler.class).size());
         });
     }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "app.notification.kafka.enabled=true", "app.payment.kafka.enabled=true", "app.order.kafka.enabled=true", "app.inventory.order-kafka.enabled=true"
+    })
+    void shouldEnableErrorHandlerForEachOtherConsumerFlag(String property) {
+        runner.withPropertyValues(property).run(context -> {
+            assertNull(context.getStartupFailure());
+            assertEquals(1, context.getBeansOfType(DefaultErrorHandler.class).size());
+            assertTrue(context.getBeansOfType(ProductCreatedConsumer.class).isEmpty());
+        });
+    }
+
 }

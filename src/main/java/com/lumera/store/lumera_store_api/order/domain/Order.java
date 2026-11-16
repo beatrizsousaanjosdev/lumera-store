@@ -91,13 +91,46 @@ public class Order {
         this.status = OrderStatus.PENDING_PAYMENT;
     }
 
-    public void confirmPayment() {
-        if (status == OrderStatus.CONFIRMED) {
-            return;
+
+    public boolean markPaymentApproved() {
+        if (status == OrderStatus.PENDING_STOCK_CONFIRMATION
+                || status == OrderStatus.CONFIRMED) {
+            return false;
         }
 
         requireStatus(OrderStatus.PENDING_PAYMENT);
-        this.status = OrderStatus.CONFIRMED;
+        status = OrderStatus.PENDING_STOCK_CONFIRMATION;
+        return true;
+    }
+
+    public boolean markPaymentDeclined() {
+        if (status == OrderStatus.PENDING_STOCK_RELEASE) {
+            return false;
+        }
+
+        requireStatus(OrderStatus.PENDING_PAYMENT);
+        status = OrderStatus.PENDING_STOCK_RELEASE;
+        return true;
+    }
+
+    public boolean confirmStockWithdrawal() {
+        if (status == OrderStatus.CONFIRMED) {
+            return false;
+        }
+
+        requireStatus(OrderStatus.PENDING_STOCK_CONFIRMATION);
+        status = OrderStatus.CONFIRMED;
+        return true;
+    }
+
+    public boolean completeStockRelease() {
+        if (status == OrderStatus.CANCELLED) {
+            return false;
+        }
+
+        requireStatus(OrderStatus.PENDING_STOCK_RELEASE);
+        status = OrderStatus.CANCELLED;
+        return true;
     }
 
     public void cancel() {
@@ -111,6 +144,7 @@ public class Order {
             );
         }
 
+        requireStatus(OrderStatus.PENDING_STOCK);
         this.status = OrderStatus.CANCELLED;
     }
 

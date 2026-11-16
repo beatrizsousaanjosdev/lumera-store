@@ -38,7 +38,7 @@ import java.util.stream.IntStream;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-@SpringBootTest(properties = {"app.outbox.enabled=false", "app.inventory.kafka.enabled=true",
+@SpringBootTest(properties = {"app.outbox.enabled=false", "app.notification.kafka.enabled=false", "app.payment.kafka.enabled=false", "app.inventory.kafka.enabled=true",
         "app.inventory.order-kafka.enabled=true", "app.order.kafka.enabled=true",
         "spring.kafka.consumer.group-id=order-flow-products", "app.inventory.order-kafka.group-id=order-flow-inventory",
         "app.order.kafka.group-id=order-flow-orders"})
@@ -70,6 +70,10 @@ class OrderReservationKafkaIntegrationTest {
                 topics.add(new NewTopic(topic,3,(short)1));
                 topics.add(new NewTopic(topic+".DLT",3,(short)1));
             }
+            for(String topic:List.of("lumera.payment.processed.v1", "lumera.payment.requested.v1", "lumera.stock.finalization.requested.v1", "lumera.stock.finalized.v1", "lumera.order.completed.v1")) {
+                topics.add(new NewTopic(topic,3,(short)1));
+                topics.add(new NewTopic(topic+".DLT",3,(short)1));
+            }
             admin.createTopics(topics).all().get(20,TimeUnit.SECONDS);
         }
     }
@@ -89,7 +93,7 @@ class OrderReservationKafkaIntegrationTest {
                     var c=listeners.getListenerContainer(id);
                     return c!=null && c.getAssignedPartitions()!=null && c.getAssignedPartitions().size()==3;
                 }), "Consumers assigned");
-        for(String table:List.of("stock_reservation_items","stock_reservations","order_items","orders","inventories","outbox_events","products"))
+        for(String table:List.of("stock_reservation_items","stock_reservations","order_payment_results","payments","order_items","orders","inventories","outbox_events","products"))
             jdbc.update("DELETE FROM "+table);
     }
     @AfterEach void committed() {
@@ -118,7 +122,7 @@ class OrderReservationKafkaIntegrationTest {
         drive(order,"PENDING_PAYMENT");
         assertStock(first,10,3); assertStock(second,5,2);
         assertEquals("RESERVED", reservationStatus(order));
-        assertEquals(2,count("SELECT count(*) FROM outbox_events WHERE aggregate_id=? AND published_at IS NOT NULL",order));
+        assertEquals(2,count("SELECT count(*) FROM outbox_events WHERE aggregate_id=? AND event_type IN ('OrderCreated','StockReservationResult') AND published_at IS NOT NULL",order));
     }
     @Test void shouldRejectWholeOrderWithoutPartialReservation() {
         UUID first=product(10), second=product(1);

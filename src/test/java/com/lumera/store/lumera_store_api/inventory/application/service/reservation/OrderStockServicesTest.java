@@ -99,8 +99,8 @@ class OrderStockServicesTest {
 
     private Function<UUID, StockReservation> finalizeService(String operation) {
         return operation.equals("release")
-                ? new ReleaseOrderStockService(inventory, reservations)::execute
-                : new ConfirmOrderStockService(inventory, reservations)::execute;
+                ? new ReleaseOrderStockService(inventory, reservations, events)::execute
+                : new ConfirmOrderStockService(inventory, reservations, events)::execute;
     }
 
     @ParameterizedTest
@@ -128,6 +128,8 @@ class OrderStockServicesTest {
         order.verify(inventory).findByProductIdForUpdate(second);
         order.verify(inventory).save(b);
         order.verify(reservations).save(reservation);
+        verify(events).appendFinalized(argThat(event -> event.orderId().equals(id)
+                && event.confirmed() == operation.equals("confirm")));
     }
 
     @ParameterizedTest

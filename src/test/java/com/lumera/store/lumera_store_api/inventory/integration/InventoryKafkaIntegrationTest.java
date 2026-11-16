@@ -52,7 +52,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 @SpringBootTest(properties = {
-        "app.outbox.enabled=false",
+        "app.outbox.enabled=false", "app.notification.kafka.enabled=false", "app.payment.kafka.enabled=false",
         "app.inventory.kafka.enabled=true",
         "app.inventory.order-kafka.enabled=false",
         "app.order.kafka.enabled=false",

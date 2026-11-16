@@ -25,7 +25,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@SpringBootTest(properties = {"app.outbox.enabled=false", "app.inventory.kafka.enabled=false", "app.inventory.order-kafka.enabled=false", "app.order.kafka.enabled=false"})
+@SpringBootTest(properties = {"app.outbox.enabled=false", "app.notification.kafka.enabled=false", "app.payment.kafka.enabled=false", "app.inventory.kafka.enabled=false", "app.inventory.order-kafka.enabled=false", "app.order.kafka.enabled=false"})
 @AutoConfigureMockMvc
 @Testcontainers
 class CatalogIntegrationTest {
@@ -56,8 +56,8 @@ class CatalogIntegrationTest {
 
     @Test
     void shouldApplyMigrationsAndValidateJpaMapping() {
-        assertEquals(7, flyway.info().applied().length);
-        assertEquals("7", flyway.info().current().getVersion().toString());
+        assertEquals(11, flyway.info().applied().length);
+        assertEquals("11", flyway.info().current().getVersion().toString());
         assertEquals("NO", jdbc.queryForObject("""
                 SELECT is_nullable FROM information_schema.columns
                 WHERE table_schema = 'public' AND table_name = 'products' AND column_name = 'category'

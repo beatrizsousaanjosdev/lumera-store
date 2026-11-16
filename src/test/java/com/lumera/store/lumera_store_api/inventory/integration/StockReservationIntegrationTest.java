@@ -36,7 +36,7 @@ import java.util.function.BooleanSupplier;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-@SpringBootTest(properties = {"app.outbox.enabled=false", "app.inventory.kafka.enabled=false", "app.inventory.order-kafka.enabled=false", "app.order.kafka.enabled=false"})
+@SpringBootTest(properties = {"app.outbox.enabled=false", "app.notification.kafka.enabled=false", "app.payment.kafka.enabled=false", "app.inventory.kafka.enabled=false", "app.inventory.order-kafka.enabled=false", "app.order.kafka.enabled=false"})
 @Testcontainers
 class StockReservationIntegrationTest {
     @Container
@@ -82,8 +82,8 @@ class StockReservationIntegrationTest {
 
     @Test
     void shouldApplyV6AndPersistAggregateInOriginalItemOrder() {
-        assertEquals("7", flyway.info().current().getVersion().toString());
-        assertEquals(7, flyway.info().applied().length);
+        assertEquals("11", flyway.info().current().getVersion().toString());
+        assertEquals(11, flyway.info().applied().length);
         stock(first, 10); stock(second, 10);
         UUID id = UUID.randomUUID();
         var result = reserve.execute(new ReserveOrderStockCommand(id, items()));

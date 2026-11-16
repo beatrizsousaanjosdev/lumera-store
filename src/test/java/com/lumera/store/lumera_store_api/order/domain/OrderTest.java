@@ -3,7 +3,6 @@ package com.lumera.store.lumera_store_api.order.domain;
 import com.lumera.store.lumera_store_api.order.domain.exception.InvalidOrderException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.*;
@@ -52,29 +51,38 @@ class OrderTest {
         assertThrows(InvalidOrderException.class, () -> Order.restore(id, items, timestamp, null));
     }
 
+    static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> transitions() {
+        var allowed = Map.of(
+                "stock", Map.of(OrderStatus.PENDING_STOCK, OrderStatus.PENDING_PAYMENT, OrderStatus.PENDING_PAYMENT, OrderStatus.PENDING_PAYMENT),
+                "approve", Map.of(OrderStatus.PENDING_PAYMENT, OrderStatus.PENDING_STOCK_CONFIRMATION,
+                        OrderStatus.PENDING_STOCK_CONFIRMATION, OrderStatus.PENDING_STOCK_CONFIRMATION, OrderStatus.CONFIRMED, OrderStatus.CONFIRMED),
+                "decline", Map.of(OrderStatus.PENDING_PAYMENT, OrderStatus.PENDING_STOCK_RELEASE, OrderStatus.PENDING_STOCK_RELEASE, OrderStatus.PENDING_STOCK_RELEASE),
+                "withdraw", Map.of(OrderStatus.PENDING_STOCK_CONFIRMATION, OrderStatus.CONFIRMED, OrderStatus.CONFIRMED, OrderStatus.CONFIRMED),
+                "release", Map.of(OrderStatus.PENDING_STOCK_RELEASE, OrderStatus.CANCELLED, OrderStatus.CANCELLED, OrderStatus.CANCELLED),
+                "cancel", Map.of(OrderStatus.PENDING_STOCK, OrderStatus.CANCELLED, OrderStatus.CANCELLED, OrderStatus.CANCELLED));
+        return Arrays.stream(OrderStatus.values()).flatMap(initial -> allowed.entrySet().stream()
+                .map(entry -> org.junit.jupiter.params.provider.Arguments.of(initial, entry.getKey(), entry.getValue().get(initial))));
+    }
+
     @ParameterizedTest
-    @CsvSource({
-            "PENDING_STOCK,stock,PENDING_PAYMENT", "PENDING_PAYMENT,stock,PENDING_PAYMENT",
-            "CONFIRMED,stock,ERROR", "CANCELLED,stock,ERROR",
-            "PENDING_STOCK,payment,ERROR", "PENDING_PAYMENT,payment,CONFIRMED",
-            "CONFIRMED,payment,CONFIRMED", "CANCELLED,payment,ERROR",
-            "PENDING_STOCK,cancel,CANCELLED", "PENDING_PAYMENT,cancel,CANCELLED",
-            "CONFIRMED,cancel,ERROR", "CANCELLED,cancel,CANCELLED"
-    })
-    void shouldEnforceStateMachine(OrderStatus initial, String operation, String expected) {
+    @org.junit.jupiter.params.provider.MethodSource("transitions")
+    void shouldEnforceEveryStateTransition(OrderStatus initial, String operation, OrderStatus expected) {
         var order = Order.restore(UUID.randomUUID(), List.of(item()), Instant.now(), initial);
         Runnable transition = switch (operation) {
             case "stock" -> order::markStockReserved;
-            case "payment" -> order::confirmPayment;
+            case "approve" -> order::markPaymentApproved;
+            case "decline" -> order::markPaymentDeclined;
+            case "withdraw" -> order::confirmStockWithdrawal;
+            case "release" -> order::completeStockRelease;
             case "cancel" -> order::cancel;
             default -> throw new IllegalArgumentException(operation);
         };
-        if (expected.equals("ERROR")) {
+        if (expected == null) {
             assertThrows(InvalidOrderException.class, transition::run);
             assertEquals(initial, order.getStatus());
         } else {
             transition.run();
-            assertEquals(OrderStatus.valueOf(expected), order.getStatus());
+            assertEquals(expected, order.getStatus());
         }
     }
 }

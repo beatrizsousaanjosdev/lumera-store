@@ -1,5 +1,6 @@
 package com.lumera.store.lumera_store_api.inventory.adapter.out.persistence.outbox;
 
+import com.lumera.store.lumera_store_api.inventory.application.event.StockFinalizedEvent;
 import com.lumera.store.lumera_store_api.inventory.application.event.StockReservationResultEvent;
 import com.lumera.store.lumera_store_api.inventory.application.port.out.StockReservationEventOutboxPort;
 import com.lumera.store.lumera_store_api.shared.infrastructure.outbox.persistence.OutboxEventEntity;
@@ -21,5 +22,18 @@ public class StockReservationEventOutboxAdapter implements StockReservationEvent
     public void append(StockReservationResultEvent event) {
         repository.save(new OutboxEventEntity(event.eventId(), event.orderId(), "StockReservation",
                 "StockReservationResult", mapper.writeValueAsString(event), event.occurredAt()));
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void appendFinalized(StockFinalizedEvent event) {
+        repository.save(new OutboxEventEntity(
+                event.eventId(),
+                event.orderId(),
+                "StockReservation",
+                "StockFinalized",
+                mapper.writeValueAsString(event),
+                event.occurredAt()
+        ));
     }
 }

@@ -40,6 +40,16 @@ app:
       order-created-dlt: lumera.order.created.v1.DLT
       stock-reservation-result: lumera.stock.reservation.result.v1
       stock-reservation-result-dlt: lumera.stock.reservation.result.v1.DLT
+      payment-processed: lumera.payment.processed.v1
+      payment-processed-dlt: lumera.payment.processed.v1.DLT
+      payment-requested: lumera.payment.requested.v1
+      payment-requested-dlt: lumera.payment.requested.v1.DLT
+      stock-finalization-requested: lumera.stock.finalization.requested.v1
+      stock-finalization-requested-dlt: lumera.stock.finalization.requested.v1.DLT
+      stock-finalized: lumera.stock.finalized.v1
+      stock-finalized-dlt: lumera.stock.finalized.v1.DLT
+      order-completed: lumera.order.completed.v1
+      order-completed-dlt: lumera.order.completed.v1.DLT
   outbox:
     enabled: ${OUTBOX_ENABLED:false}
     batch-size: 50
@@ -56,6 +66,16 @@ app:
       group-id: lumera-inventory-orders
     kafka:
       enabled: ${INVENTORY_KAFKA_ENABLED:false}
+  notification:
+    kafka:
+      enabled: ${NOTIFICATION_KAFKA_ENABLED:false}
+      group-id: lumera-notifications
+  payment:
+    simulator:
+      decision: ${PAYMENT_SIMULATOR_DECISION:APPROVED}
+    kafka:
+      enabled: ${PAYMENT_KAFKA_ENABLED:false}
+      group-id: lumera-payments
 logging:
   level:
     com.lumera.store.lumera_store_api.catalog: DEBUG

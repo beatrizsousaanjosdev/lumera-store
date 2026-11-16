@@ -8,7 +8,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
-@SpringBootTest(properties = {"app.outbox.enabled=false", "app.inventory.kafka.enabled=false", "app.inventory.order-kafka.enabled=false", "app.order.kafka.enabled=false"})
+@SpringBootTest(properties = {"app.outbox.enabled=false", "app.notification.kafka.enabled=false", "app.payment.kafka.enabled=false", "app.inventory.kafka.enabled=false", "app.inventory.order-kafka.enabled=false", "app.order.kafka.enabled=false"})
 @Testcontainers
 class LumeraStoreApiApplicationTests {
 

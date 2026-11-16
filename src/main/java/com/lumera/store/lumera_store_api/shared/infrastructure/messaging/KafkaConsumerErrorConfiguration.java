@@ -11,7 +11,13 @@ import org.springframework.util.backoff.FixedBackOff;
 import java.time.Duration;
 
 @Configuration(proxyBeanMethods = false)
-@ConditionalOnExpression("${app.inventory.kafka.enabled:false} || ${app.inventory.order-kafka.enabled:false} || ${app.order.kafka.enabled:false}")
+@ConditionalOnExpression(
+        "${app.inventory.kafka.enabled:false} || "
+                + "${app.inventory.order-kafka.enabled:false} || "
+                + "${app.order.kafka.enabled:false} || "
+                + "${app.payment.kafka.enabled:false} || "
+                + "${app.notification.kafka.enabled:false}"
+)
 public class KafkaConsumerErrorConfiguration {
     @Bean
     public DefaultErrorHandler integrationKafkaErrorHandler(KafkaTemplate<String, String> template, EventRoutes routes) {

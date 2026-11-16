@@ -37,7 +37,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@SpringBootTest(properties = {"app.outbox.enabled=false", "app.inventory.kafka.enabled=false", "app.inventory.order-kafka.enabled=false", "app.order.kafka.enabled=false"})
+@SpringBootTest(properties = {"app.outbox.enabled=false", "app.notification.kafka.enabled=false", "app.payment.kafka.enabled=false", "app.inventory.kafka.enabled=false", "app.inventory.order-kafka.enabled=false", "app.order.kafka.enabled=false"})
 @AutoConfigureMockMvc
 @Testcontainers
 class OrderIntegrationTest {
@@ -67,6 +67,7 @@ class OrderIntegrationTest {
     @BeforeEach
     void clearTestDatabase() {
         jdbc.update("DELETE FROM order_items");
+        jdbc.update("DELETE FROM order_payment_results");
         jdbc.update("DELETE FROM orders");
         jdbc.update("DELETE FROM inventories");
         jdbc.update("DELETE FROM outbox_events");
@@ -89,8 +90,8 @@ class OrderIntegrationTest {
 
     @Test
     void shouldApplyMigrationsAndValidateJpaMappings() {
-        assertEquals("7", flyway.info().current().getVersion().toString());
-        assertEquals(7, flyway.info().applied().length);
+        assertEquals("11", flyway.info().current().getVersion().toString());
+        assertEquals(11, flyway.info().applied().length);
         assertEquals(2, jdbc.queryForObject("""
                 SELECT count(*) FROM information_schema.tables
                 WHERE table_schema='public' AND table_name IN ('orders','order_items')

@@ -28,8 +28,25 @@ A product is saved together with an outbox event. A background publisher sends t
 - Publish `OrderCreated` through the shared transactional outbox.
 - Reserve all order items atomically in inventory; duplicate deliveries preserve quantities.
 - Publish `StockReservationResult` in the same transaction as the stock decision.
-- Apply the result to the order: `PENDING_PAYMENT` on success or `CANCELLED` on rejection.
+- Request payment after stock is reserved; cancel immediately if the reservation is rejected.
+- Complete checkout through an event-driven saga coordinated by the order module.
+- Confirm the order after stock withdrawal, or release the reservation after payment refusal.
 - Serialize concurrent reservations with an advisory lock per order and consistently ordered inventory row locks.
+
+### Payment
+
+- Simulate approval or refusal with `PAYMENT_SIMULATOR_DECISION=APPROVED|DECLINED`.
+- Serialize processing per order and keep one payment per order.
+- Persist payment results and outbox events atomically.
+- Record the payment identity, amount, and outcome accepted by each order to reject conflicting replays.
+
+### Notifications
+
+- Publish `OrderCompleted` atomically when an order is confirmed or cancelled, including initial stock rejection.
+- Consume final outcomes through Kafka in an independent notification module.
+- Persist one simulated notification per order; duplicate events preserve the original record.
+- Log the simulated message after the notification transaction commits.
+- Retry technical failures and route malformed or conflicting messages to a dedicated DLT.
 
 ### Reliability and testing
 
@@ -99,23 +116,31 @@ The publisher marks an event as published only after Kafka acknowledges the send
 
 Database commits and Kafka offset commits are separate. The system relies on idempotency rather than claiming exactly-once processing across both systems.
 
-### Order-to-stock flow
+### Checkout saga
 
 ```mermaid
 flowchart LR
-    API[POST /orders] --> O[Order + OrderCreated outbox]
-    O --> K[Kafka: OrderCreated]
-    K --> I[Inventory: reserve all items]
-    I --> R[Reservation + result outbox]
-    R --> KR[Kafka: StockReservationResult]
-    KR --> S{Stock reserved?}
-    S -->|Yes| P[PENDING_PAYMENT]
-    S -->|No| C[CANCELLED]
+    O[Order created] --> R[Reserve stock]
+    R -->|Reserved| P[Request simulated payment]
+    R -->|Rejected| C[Order CANCELLED]
+    P -->|Approved| W[Confirm stock withdrawal]
+    P -->|Declined| L[Release reservation]
+    W --> F[Order CONFIRMED]
+    L --> C
 ```
 
-Order creation and its event share one database transaction. Stock changes, the
-reservation decision, and its result event share another. Updating the order from
-the result is a separate transaction; the API therefore exposes eventual consistency.
+Every step communicates through Kafka and a transactional outbox. The order module
+coordinates the workflow using durable intermediate states. Each handler commits
+its database changes and outgoing event together; offset commits remain separate.
+Duplicate handling therefore uses business identity and recorded outcomes.
+
+A successful order follows `PENDING_STOCK -> PENDING_PAYMENT -> PENDING_STOCK_CONFIRMATION -> CONFIRMED`.
+A refused payment follows `PENDING_PAYMENT -> PENDING_STOCK_RELEASE -> CANCELLED`.
+The release of reserved stock is the compensation for payment refusal.
+
+Technical failures are retried and can reach a route-specific DLT. An order may
+remain pending until the cause is resolved and the event is explicitly replayed;
+there is no automatic DLT replay or reservation-expiry job.
 
 ## Getting started
 
@@ -151,7 +176,7 @@ podman compose up -d --wait postgres kafka
 
 ### 3. Create the Kafka topics
 
-Automatic topic creation is disabled. Create the three event topics and their DLTs:
+Automatic topic creation is disabled. Create the eight event topics and their DLTs:
 
 ```bash
 ./scripts/create-kafka-topics.sh
@@ -162,6 +187,11 @@ Automatic topic creation is disabled. Create the three event topics and their DL
 | ProductCreated | `lumera.product.created.v1` |
 | OrderCreated | `lumera.order.created.v1` |
 | StockReservationResult | `lumera.stock.reservation.result.v1` |
+| PaymentRequested | `lumera.payment.requested.v1` |
+| PaymentProcessed | `lumera.payment.processed.v1` |
+| StockFinalizationRequested | `lumera.stock.finalization.requested.v1` |
+| StockFinalized | `lumera.stock.finalized.v1` |
+| OrderCompleted | `lumera.order.completed.v1` |
 
 Each topic has a corresponding `.DLT`. The script uses three partitions and replication factor one for local development and preserves existing topics. If an existing topic has a different partition count, ensure its DLT has the same count.
 
@@ -169,14 +199,15 @@ The DLT has the same number of partitions because failed messages retain their s
 
 ### 4. Run the API
 
-Enable the outbox publisher and the three consumers:
+Enable the outbox publisher and the consumers:
 
 ```bash
 OUTBOX_ENABLED=true INVENTORY_KAFKA_ENABLED=true \
-INVENTORY_ORDER_KAFKA_ENABLED=true ORDER_KAFKA_ENABLED=true ./gradlew bootRun
+INVENTORY_ORDER_KAFKA_ENABLED=true ORDER_KAFKA_ENABLED=true \
+PAYMENT_KAFKA_ENABLED=true NOTIFICATION_KAFKA_ENABLED=true ./gradlew bootRun
 ```
 
-When running from an IDE, set these four environment variables in its run configuration. A plain `./gradlew bootRun` leaves background publishing and consumers disabled by default; the manual inventory endpoints remain available.
+When running from an IDE, set these six environment variables in its run configuration. A plain `./gradlew bootRun` leaves background publishing and consumers disabled by default; the manual inventory endpoints remain available.
 
 Flyway applies pending migrations at startup, and Hibernate validates the resulting schema.
 
@@ -213,7 +244,10 @@ The Compose credentials are local development defaults. This setup uses a single
 | `OUTBOX_ENABLED` | `false` | Enable scheduled event publication |
 | `INVENTORY_KAFKA_ENABLED` | `false` | Enable ProductCreated consumption by inventory |
 | `INVENTORY_ORDER_KAFKA_ENABLED` | `false` | Enable OrderCreated consumption and stock reservation |
-| `ORDER_KAFKA_ENABLED` | `false` | Enable reservation-result consumption by orders |
+| `ORDER_KAFKA_ENABLED` | `false` | Enable reservation, payment, and finalization result consumption by orders |
+| `PAYMENT_KAFKA_ENABLED` | `false` | Enable PaymentRequested consumption |
+| `NOTIFICATION_KAFKA_ENABLED` | `false` | Enable OrderCompleted consumption and simulated notifications |
+| `PAYMENT_SIMULATOR_DECISION` | `APPROVED` | Simulated result: APPROVED or DECLINED |
 
 A `.env` file is not automatically loaded by Spring Boot. Export variables in your shell or configure them in your IDE. The current Compose file defines its database credentials directly; changing application variables does not change an existing PostgreSQL user's password.
 
@@ -283,7 +317,8 @@ matching duplicates. Conflicting results go to the result DLT.
 
 The order creation endpoint returns `PENDING_STOCK`; subsequent `GET /orders/{id}`
 requests observe the asynchronous transition. Successful reservation keeps units
-reserved: payment processing, stock confirmation, and compensation are future work.
+reserved while payment is pending. Payment approval triggers stock withdrawal before
+the order becomes CONFIRMED; refusal releases the reservation before cancellation.
 Orders created while consumers are disabled remain pending until event processing resumes.
 
 ## Example workflow
@@ -396,14 +431,54 @@ See [TESTING.md](TESTING.md) for more details.
 ## Current scope and roadmap
 
 Catalog, inventory, order creation/lookup, and the asynchronous order-stock reservation
-flow are implemented. Flyway V7 generalizes the existing outbox while preserving pending
-and published product events.
+and simulated-payment checkout flows are implemented. Flyway migrations include the
+shared outbox (V7), payment storage (V8), intermediate order states (V9), and accepted
+payment results for replay validation (V10), and simulated notification records (V11).
 
 Planned extensions:
 
 - HTTP idempotency for order creation (Kafka replay idempotency is already implemented).
-- Payment simulation and a saga coordinating stock, payment, and compensation.
-- Reservation expiry, cancellation, and recovery of orders stalled in an intermediate state.
+- Integrate a real payment provider with durable provider idempotency and reconciliation.
+- Real notification delivery, reservation expiry, cancellation, and recovery of stalled orders.
 - Operational metrics, alerts, and a DLT replay workflow.
 
 Authentication and authorization are not implemented. This is a portfolio project with a local development environment; production deployment would require additional operational and security work.
+
+### Testing payment outcomes locally
+
+Start with all consumer flags enabled as above. The default simulator approves every
+new payment. To exercise refusal, restart with the same flags and
+`PAYMENT_SIMULATOR_DECISION=DECLINED`, then create a new order with sufficient stock.
+Existing payments keep their recorded outcome on replay, even if the configuration changes.
+
+The simulator performs no external charge. A real provider requires a stable, persisted
+idempotency key before making an external request, plus reconciliation after ambiguous
+failures; database rollback cannot reverse an external charge.
+
+### Inspecting simulated notifications
+
+After creating an order with all consumer flags enabled, wait for its terminal status
+and for the notification consumer. The application writes an INFO log such as:
+
+```text
+Simulated order notification: notificationId=..., orderId=..., outcome=CONFIRMED, message=Your order ... has been confirmed.
+```
+
+The durable record can be inspected in PostgreSQL:
+
+```sql
+SELECT order_id, outcome, processed_at
+FROM order_notifications
+ORDER BY processed_at DESC;
+```
+
+`CANCELLED` is also produced for insufficient stock and refused payment. Notification
+failures do not change the completed order or undo stock movements. Technical failures
+get two retries after the initial attempt; exhausted messages require explicit review
+and replay from `lumera.order.completed.v1.DLT`.
+
+This version simulates delivery; it has no email recipient or external email provider.
+The database row is the durable record of the simulation. Logs run after commit and
+are diagnostic output; a process crash between commit and logging can omit a log line.
+A future external delivery adapter needs provider idempotency and reconciliation to
+handle failures between sending a message and recording its delivery.
